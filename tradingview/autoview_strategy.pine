@@ -1,0 +1,65 @@
+// ============================================================================
+// News Sentiment AUTO-TRADING Strategy
+// ============================================================================
+// Strategy version that can send webhook alerts to your signal server
+// for automated order execution.
+//
+// Works with: Autoview, TradingConnector, or any webhook-based bridge.
+// ============================================================================
+
+//@version=5
+strategy("News Sentiment Auto-Trade", overlay=true,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=5,
+     pyramiding=0,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1)
+
+// --- Inputs ---
+sentimentBuyThreshold  = input.float(0.4, "Buy Threshold", group="Sentiment")
+sentimentSellThreshold = input.float(-0.4, "Sell Threshold", group="Sentiment")
+minConfidence          = input.float(0.6, "Min Confidence", group="Sentiment")
+
+// Position management
+takeProfitPct = input.float(2.0, "Take Profit %", group="Risk", minval=0.1)
+stopLossPct   = input.float(1.0, "Stop Loss %", group="Risk", minval=0.1)
+maxHoldBars   = input.int(50, "Max Hold Bars", group="Risk", minval=1)
+
+// Signal input (webhook-driven)
+sentimentScore = input.float(0.0, "Sentiment Score", minval=-1.0, maxval=1.0)
+confidenceScore = input.float(0.0, "Confidence", minval=0.0, maxval=1.0)
+
+// --- Signal conditions ---
+buyCondition  = sentimentScore >= sentimentBuyThreshold and confidenceScore >= minConfidence
+sellCondition = sentimentScore <= sentimentSellThreshold and confidenceScore >= minConfidence
+
+// --- Entry logic ---
+if buyCondition and strategy.position_size == 0
+    strategy.entry("News_Buy", strategy.long,
+         alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"sentiment":' + str.tostring(sentimentScore) + '}')
+
+if sellCondition and strategy.position_size == 0
+    strategy.entry("News_Sell", strategy.short,
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"sentiment":' + str.tostring(sentimentScore) + '}')
+
+// --- Exit logic ---
+if strategy.position_size > 0
+    strategy.exit("TP/SL Long", "News_Buy",
+         profit=close * takeProfitPct / 100 / syminfo.mintick,
+         loss=close * stopLossPct / 100 / syminfo.mintick,
+         alert_message='{"action":"close_long","ticker":"{{ticker}}","price":{{close}}}')
+
+if strategy.position_size < 0
+    strategy.exit("TP/SL Short", "News_Sell",
+         profit=close * takeProfitPct / 100 / syminfo.mintick,
+         loss=close * stopLossPct / 100 / syminfo.mintick,
+         alert_message='{"action":"close_short","ticker":"{{ticker}}","price":{{close}}}')
+
+// --- Time-based exit ---
+barsInPosition = ta.barssince(strategy.position_size != strategy.position_size[1] and strategy.position_size != 0)
+if barsInPosition >= maxHoldBars and strategy.position_size != 0
+    strategy.close_all(alert_message='{"action":"close_all","ticker":"{{ticker}}","reason":"max_hold_time"}')
+
+// --- Visual ---
+plotshape(buyCondition, "Buy Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(sellCondition, "Sell Signal", shape.triangledown, location.abovebar, color.red, size=size.small)

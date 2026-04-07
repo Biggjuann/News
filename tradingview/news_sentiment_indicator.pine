@@ -1,0 +1,86 @@
+// ============================================================================
+// News Sentiment Trading Signal Indicator
+// ============================================================================
+// This Pine Script indicator connects to the News Trading Signal API
+// and displays BUY/SELL signals based on real-time news sentiment analysis.
+//
+// SETUP:
+// 1. Deploy the Python signal server (see README.md)
+// 2. Use a TradingView webhook bridge (see tradingview/webhook_bridge.md)
+// 3. Add this indicator to your chart
+//
+// NOTE: TradingView Pine Script cannot make HTTP requests directly.
+// Signals are delivered via TradingView Alerts + Webhook.
+// This indicator uses manual input or alert-driven data.
+// ============================================================================
+
+//@version=5
+indicator("News Sentiment Signals", overlay=true, max_labels_count=500)
+
+// --- Inputs ---
+sentimentThresholdBuy  = input.float(0.4, "Buy Threshold", minval=0.1, maxval=1.0, step=0.1)
+sentimentThresholdSell = input.float(-0.4, "Sell Threshold", minval=-1.0, maxval=-0.1, step=0.1)
+showLabels             = input.bool(true, "Show Signal Labels")
+showBackground         = input.bool(true, "Show Sentiment Background")
+alertOnSignal          = input.bool(true, "Enable Alerts")
+
+// --- External Signal Input ---
+// These values are updated via TradingView's alert system + webhook bridge.
+// In practice, you'd use a strategy with alert_message() or
+// connect via a third-party bridge service.
+//
+// For manual testing, you can use input.float to simulate signals:
+manualSentiment = input.float(0.0, "Manual Sentiment Score (-1 to 1)",
+     minval=-1.0, maxval=1.0, step=0.05,
+     tooltip="Set manually or use webhook bridge to update automatically")
+manualConfidence = input.float(0.0, "Manual Confidence (0 to 1)",
+     minval=0.0, maxval=1.0, step=0.05)
+
+// --- Signal Logic ---
+sentiment = manualSentiment
+confidence = manualConfidence
+
+isBuySignal  = sentiment >= sentimentThresholdBuy and confidence > 0.5
+isSellSignal = sentiment <= sentimentThresholdSell and confidence > 0.5
+
+// --- Visual: Background color ---
+bgColor = isBuySignal  ? color.new(color.green, 85) :
+          isSellSignal ? color.new(color.red, 85) :
+          color.new(color.gray, 95)
+
+bgcolor(showBackground ? bgColor : na, title="Sentiment Background")
+
+// --- Visual: Signal labels ---
+if showLabels and isBuySignal
+    label.new(bar_index, low, "BUY\n" + str.tostring(sentiment, "#.##"),
+         style=label.style_label_up,
+         color=color.green,
+         textcolor=color.white,
+         size=size.small)
+
+if showLabels and isSellSignal
+    label.new(bar_index, high, "SELL\n" + str.tostring(sentiment, "#.##"),
+         style=label.style_label_down,
+         color=color.red,
+         textcolor=color.white,
+         size=size.small)
+
+// --- Visual: Sentiment gauge in status line ---
+var string sentimentText = ""
+if sentiment > 0.15
+    sentimentText := "BULLISH (" + str.tostring(sentiment, "#.##") + ")"
+else if sentiment < -0.15
+    sentimentText := "BEARISH (" + str.tostring(sentiment, "#.##") + ")"
+else
+    sentimentText := "NEUTRAL (" + str.tostring(sentiment, "#.##") + ")"
+
+// Plot invisible line for data window display
+plot(sentiment, "Sentiment Score", color=color.new(color.blue, 100), display=display.data_window)
+plot(confidence, "Confidence", color=color.new(color.orange, 100), display=display.data_window)
+
+// --- Alerts ---
+alertcondition(isBuySignal, title="News BUY Signal",
+     message='{"action":"buy","ticker":"{{ticker}}","sentiment":' + str.tostring(sentiment) + ',"confidence":' + str.tostring(confidence) + '}')
+
+alertcondition(isSellSignal, title="News SELL Signal",
+     message='{"action":"sell","ticker":"{{ticker}}","sentiment":' + str.tostring(sentiment) + ',"confidence":' + str.tostring(confidence) + '}')
