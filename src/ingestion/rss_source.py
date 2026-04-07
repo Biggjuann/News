@@ -9,11 +9,11 @@ Sources:
 """
 
 import logging
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 import aiohttp
-import feedparser
 
 from src.models import NewsArticle
 from src.ingestion.base import NewsSource
@@ -25,6 +25,41 @@ RSS_FEEDS = {
     "marketwatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
     "sec_edgar_8k": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=20&search_text=&action=getcurrent&output=atom",
 }
+
+# Atom namespace used by SEC EDGAR
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+
+def _parse_rss(content: str) -> list[dict]:
+    """Parse RSS 2.0 or Atom feed XML into a list of entry dicts."""
+    entries = []
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as e:
+        logger.warning(f"XML parse error: {e}")
+        return entries
+
+    # RSS 2.0: <rss><channel><item>...
+    for item in root.iter("item"):
+        entries.append({
+            "title": (item.findtext("title") or "").strip(),
+            "summary": (item.findtext("description") or "").strip(),
+            "link": (item.findtext("link") or "").strip(),
+            "published": (item.findtext("pubDate") or "").strip(),
+        })
+
+    # Atom: <feed><entry>...
+    if not entries:
+        for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
+            link_el = entry.find("{http://www.w3.org/2005/Atom}link")
+            entries.append({
+                "title": (entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip(),
+                "summary": (entry.findtext("{http://www.w3.org/2005/Atom}summary") or "").strip(),
+                "link": link_el.get("href", "") if link_el is not None else "",
+                "published": (entry.findtext("{http://www.w3.org/2005/Atom}updated") or "").strip(),
+            })
+
+    return entries[:20]
 
 
 class RSSSource(NewsSource):
@@ -46,24 +81,30 @@ class RSSSource(NewsSource):
                         return []
                     content = await resp.text()
 
-            feed = feedparser.parse(content)
+            entries = _parse_rss(content)
 
-            for entry in feed.entries[:20]:
-                headline = entry.get("title", "")
-                summary = entry.get("summary", entry.get("description", ""))
-                link = entry.get("link", "")
+            for entry in entries:
+                headline = entry["title"]
+                summary = entry["summary"]
+                link = entry["link"]
 
                 # Try to parse publish date
                 pub_dt = datetime.now(timezone.utc)
-                if "published" in entry:
+                if entry["published"]:
                     try:
-                        pub_dt = parsedate_to_datetime(entry.published)
+                        pub_dt = parsedate_to_datetime(entry["published"])
                     except Exception:
-                        pass
+                        try:
+                            # Atom dates are ISO format
+                            pub_dt = datetime.fromisoformat(
+                                entry["published"].replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
 
                 # Match tickers mentioned in headline/summary
-                text = f"{headline} {summary}".upper()
-                matched_tickers = [t for t in tickers if f" {t.upper()} " in f" {text} "]
+                text = f" {headline} {summary} ".upper()
+                matched_tickers = [t for t in tickers if f" {t.upper()} " in text]
 
                 articles.append(NewsArticle(
                     source=self.name,
@@ -72,7 +113,7 @@ class RSSSource(NewsSource):
                     url=link,
                     tickers=matched_tickers,
                     published_at=pub_dt,
-                    raw_sentiment_score=None,  # RSS feeds have no pre-scoring
+                    raw_sentiment_score=None,
                 ))
 
         except Exception as e:
