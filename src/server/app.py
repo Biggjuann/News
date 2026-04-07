@@ -33,6 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Global reference to the signal aggregator — set by main.py at startup
 _aggregator = None
 
