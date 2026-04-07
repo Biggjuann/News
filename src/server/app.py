@@ -72,6 +72,20 @@ class TradingViewAlert(BaseModel):
 
 # --- Endpoints ---
 
+@app.get("/")
+async def root():
+    return {
+        "name": "News Trading Signal API",
+        "version": "1.0.0",
+        "endpoints": {
+            "/signals": "All active signals",
+            "/signals/{ticker}": "Signal for a specific ticker",
+            "/health": "Health check",
+            "/docs": "Interactive API docs (Swagger UI)",
+        },
+    }
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
