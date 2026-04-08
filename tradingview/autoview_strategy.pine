@@ -36,11 +36,11 @@ sellCondition = sentimentScore <= sentimentSellThreshold and confidenceScore >= 
 // --- Entry logic ---
 if buyCondition and strategy.position_size == 0
     strategy.entry("News_Buy", strategy.long,
-         alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}},"sentiment":' + str.tostring(sentimentScore) + '}')
+         alert_message='{"action":"buy","ticker":"{{ticker}}","price":{{close}}}')
 
 if sellCondition and strategy.position_size == 0
     strategy.entry("News_Sell", strategy.short,
-         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}},"sentiment":' + str.tostring(sentimentScore) + '}')
+         alert_message='{"action":"sell","ticker":"{{ticker}}","price":{{close}}}')
 
 // --- Exit logic ---
 if strategy.position_size > 0
