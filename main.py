@@ -112,6 +112,14 @@ class NewsSignalEngine:
 
     async def start(self):
         """Start all source loops and the API server."""
+        # Log key loading status (masked)
+        from config.settings import ENV_FILE
+        logger.info(f"Loading .env from: {ENV_FILE} (exists: {ENV_FILE.exists()})")
+        for name in ["finnhub_api_key", "alpha_vantage_api_key", "fmp_api_key", "anthropic_api_key"]:
+            val = getattr(settings, name, "")
+            status = f"{val[:4]}***{val[-4:]}" if len(val) > 8 else ("SET" if val else "NOT SET")
+            logger.info(f"  {name}: {status}")
+
         logger.info("=" * 60)
         logger.info("NEWS TRADING SIGNAL ENGINE STARTING")
         logger.info(f"Watching tickers: {settings.watch_tickers}")

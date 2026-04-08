@@ -3,8 +3,14 @@ Configuration for News Trading Signal system.
 API keys loaded from environment variables / .env file.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+# Resolve .env relative to project root (parent of config/)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -42,7 +48,7 @@ class Settings(BaseSettings):
     llm_model: str = "claude-haiku-4-5-20251001"
     llm_max_tokens: int = 150
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": str(ENV_FILE), "env_file_encoding": "utf-8"}
 
 
 settings = Settings()
