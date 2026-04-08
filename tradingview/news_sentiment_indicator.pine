@@ -80,7 +80,7 @@ plot(confidence, "Confidence", color=color.new(color.orange, 100), display=displ
 
 // --- Alerts ---
 alertcondition(isBuySignal, title="News BUY Signal",
-     message='{"action":"buy","ticker":"{{ticker}}","sentiment":' + str.tostring(sentiment) + ',"confidence":' + str.tostring(confidence) + '}')
+     message='{"action":"buy","ticker":"{{ticker}}","sentiment":"{{plot_0}}","confidence":"{{plot_1}}"}')
 
 alertcondition(isSellSignal, title="News SELL Signal",
-     message='{"action":"sell","ticker":"{{ticker}}","sentiment":' + str.tostring(sentiment) + ',"confidence":' + str.tostring(confidence) + '}')
+     message='{"action":"sell","ticker":"{{ticker}}","sentiment":"{{plot_0}}","confidence":"{{plot_1}}"}')
