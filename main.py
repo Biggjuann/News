@@ -1,13 +1,14 @@
 """
 News Trading Signal System — Main Orchestrator
 
-Pipeline: Fetch → Score → Aggregate → Serve via API
+Pipeline: Fetch → Score → Aggregate → Serve via API → Discord alerts
 
 Runs:
 1. Async news fetchers on configurable intervals
 2. Sentiment scoring (pre-scored + LLM fallback)
 3. Signal aggregation with weighted scoring
 4. FastAPI server exposing signals for TradingView
+5. Discord webhook notifications for BUY/SELL signals
 """
 
 import asyncio
@@ -24,6 +25,7 @@ from src.ingestion.fmp_source import FMPSource
 from src.ingestion.rss_source import create_rss_sources
 from src.scoring.scorer import SentimentScorer
 from src.signals.aggregator import SignalAggregator
+from src.notifications import DiscordNotifier
 from src.server.app import app, set_aggregator
 
 logging.basicConfig(
@@ -40,7 +42,13 @@ class NewsSignalEngine:
     def __init__(self):
         self.scorer = SentimentScorer()
         self.aggregator = SignalAggregator()
+        self.discord = DiscordNotifier(settings.discord_webhook_url)
         self._shutdown = False
+
+        if self.discord.is_configured:
+            logger.info("Discord notifications: ENABLED")
+        else:
+            logger.warning("Discord notifications: DISABLED (no webhook URL)")
 
         # Initialize all configured sources
         self.sources = []
@@ -78,6 +86,8 @@ class NewsSignalEngine:
                     f"NEW SIGNAL: {sig.direction.value} {sig.ticker} "
                     f"strength={sig.strength:.2f} confidence={sig.confidence:.2f}"
                 )
+                # Push to Discord
+                await self.discord.send_signal(sig)
 
         except asyncio.CancelledError:
             raise
@@ -128,6 +138,12 @@ class NewsSignalEngine:
         logger.info(f"Sell threshold: {settings.sell_signal_threshold}")
         logger.info(f"API server: http://{settings.host}:{settings.port}")
         logger.info("=" * 60)
+
+        # Send Discord startup notification
+        await self.discord.send_startup(
+            settings.watch_tickers,
+            [s.name for s in self.sources],
+        )
 
         # Start source fetch loops
         tasks = []

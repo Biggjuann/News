@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     port: int = 8080
     webhook_secret: str = Field(default="change-me-in-production", description="Secret for webhook auth")
 
+    # --- Notifications ---
+    discord_webhook_url: str = Field(default="", description="Discord webhook URL for signal alerts")
+
     # --- LLM Scoring ---
     llm_model: str = "claude-haiku-4-5-20251001"
     llm_max_tokens: int = 150
