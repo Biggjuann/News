@@ -12,6 +12,7 @@ Runs:
 
 import asyncio
 import logging
+import signal
 import sys
 
 import uvicorn
@@ -39,6 +40,7 @@ class NewsSignalEngine:
     def __init__(self):
         self.scorer = SentimentScorer()
         self.aggregator = SignalAggregator()
+        self._shutdown = False
 
         # Initialize all configured sources
         self.sources = []
@@ -77,14 +79,24 @@ class NewsSignalEngine:
                     f"strength={sig.strength:.2f} confidence={sig.confidence:.2f}"
                 )
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"Error processing {source.name}: {e}")
 
     async def run_source_loop(self, source, interval: int):
         """Continuously fetch from a source at the given interval."""
-        while True:
-            await self.fetch_and_process(source)
-            await asyncio.sleep(interval)
+        try:
+            while not self._shutdown:
+                await self.fetch_and_process(source)
+                try:
+                    await asyncio.sleep(interval)
+                except asyncio.CancelledError:
+                    break
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logger.info(f"Source loop stopped: {source.name}")
 
     def get_interval(self, source) -> int:
         """Get the polling interval for a source."""
@@ -114,7 +126,10 @@ class NewsSignalEngine:
         for source in self.sources:
             interval = self.get_interval(source)
             logger.info(f"Starting {source.name} loop (every {interval}s)")
-            tasks.append(asyncio.create_task(self.run_source_loop(source, interval)))
+            tasks.append(asyncio.create_task(
+                self.run_source_loop(source, interval),
+                name=f"source_{source.name}",
+            ))
 
         # Start API server
         config = uvicorn.Config(
@@ -124,9 +139,24 @@ class NewsSignalEngine:
             log_level="info",
         )
         server = uvicorn.Server(config)
-        tasks.append(asyncio.create_task(server.serve()))
 
-        await asyncio.gather(*tasks)
+        # Handle shutdown gracefully
+        loop = asyncio.get_event_loop()
+        for sig_name in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig_name, lambda: asyncio.create_task(self.shutdown(tasks, server)))
+
+        tasks.append(asyncio.create_task(server.serve(), name="uvicorn"))
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def shutdown(self, tasks, server):
+        """Gracefully shut down all tasks."""
+        logger.info("Shutting down...")
+        self._shutdown = True
+        server.should_exit = True
+        for task in tasks:
+            if not task.done():
+                task.cancel()
 
 
 async def main():
@@ -135,4 +165,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Stopped by user.")

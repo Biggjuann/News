@@ -4,6 +4,7 @@ Free tier: 60 API calls/minute, real-time company news with sentiment.
 https://finnhub.io/docs/api/company-news
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -34,36 +35,44 @@ class FinnhubSource(NewsSource):
         now = datetime.now(timezone.utc)
         date_from = (now - timedelta(hours=1)).strftime("%Y-%m-%d")
         date_to = now.strftime("%Y-%m-%d")
+        timeout = aiohttp.ClientTimeout(total=10)
 
-        async with aiohttp.ClientSession() as session:
-            for ticker in tickers:
-                try:
-                    url = f"{self.BASE_URL}/company-news"
-                    params = {
-                        "symbol": ticker,
-                        "from": date_from,
-                        "to": date_to,
-                        "token": settings.finnhub_api_key,
-                    }
-                    async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status != 200:
-                            logger.warning(f"Finnhub returned {resp.status} for {ticker}")
-                            continue
-                        data = await resp.json()
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for ticker in tickers:
+                    try:
+                        url = f"{self.BASE_URL}/company-news"
+                        params = {
+                            "symbol": ticker,
+                            "from": date_from,
+                            "to": date_to,
+                            "token": settings.finnhub_api_key,
+                        }
+                        async with session.get(url, params=params) as resp:
+                            if resp.status != 200:
+                                logger.warning(f"Finnhub returned {resp.status} for {ticker}")
+                                continue
+                            data = await resp.json()
 
-                    for item in data[:10]:  # limit to most recent 10 per ticker
-                        articles.append(NewsArticle(
-                            source="finnhub",
-                            headline=item.get("headline", ""),
-                            summary=item.get("summary", ""),
-                            url=item.get("url", ""),
-                            tickers=[ticker],
-                            published_at=datetime.fromtimestamp(
-                                item.get("datetime", 0), tz=timezone.utc
-                            ),
-                        ))
-                except Exception as e:
-                    logger.error(f"Finnhub fetch error for {ticker}: {e}")
+                        for item in data[:10]:
+                            articles.append(NewsArticle(
+                                source="finnhub",
+                                headline=item.get("headline", ""),
+                                summary=item.get("summary", ""),
+                                url=item.get("url", ""),
+                                tickers=[ticker],
+                                published_at=datetime.fromtimestamp(
+                                    item.get("datetime", 0), tz=timezone.utc
+                                ),
+                            ))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.error(f"Finnhub fetch error for {ticker}: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Finnhub session error: {e}")
 
         self._last_fetch = now
         return self._deduplicate(articles)
@@ -85,14 +94,16 @@ class FinnhubSentimentSource(NewsSource):
             return []
 
         articles = []
-        async with aiohttp.ClientSession() as session:
-            try:
+        timeout = aiohttp.ClientTimeout(total=10)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 url = f"{self.BASE_URL}/news"
                 params = {
                     "category": "general",
                     "token": settings.finnhub_api_key,
                 }
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.get(url, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(f"Finnhub general news returned {resp.status}")
                         return []
@@ -115,7 +126,9 @@ class FinnhubSentimentSource(NewsSource):
                             item.get("datetime", 0), tz=timezone.utc
                         ),
                     ))
-            except Exception as e:
-                logger.error(f"Finnhub general news fetch error: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Finnhub general news fetch error: {e}")
 
         return self._deduplicate(articles)

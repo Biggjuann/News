@@ -4,6 +4,7 @@ Free tier available — stock news with sentiment scores per article.
 https://site.financialmodelingprep.com/developer/docs#stock-news
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -40,9 +41,8 @@ class FMPSource(NewsSource):
             return []
 
         articles = []
-        async with aiohttp.ClientSession() as session:
-            try:
-                # FMP stock news endpoint supports ticker filtering
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 ticker_str = ",".join(tickers[:5])
                 url = f"{self.BASE_URL}/stock_news"
                 params = {
@@ -50,7 +50,7 @@ class FMPSource(NewsSource):
                     "limit": 30,
                     "apikey": settings.fmp_api_key,
                 }
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.get(url, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(f"FMP returned {resp.status}")
                         return []
@@ -60,7 +60,6 @@ class FMPSource(NewsSource):
                     sentiment_label = item.get("sentiment", "Neutral")
                     raw_score = SENTIMENT_MAP.get(sentiment_label, 0.0)
 
-                    # Parse published date
                     pub_str = item.get("publishedDate", "")
                     try:
                         pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
@@ -77,8 +76,10 @@ class FMPSource(NewsSource):
                         published_at=pub_dt,
                         raw_sentiment_score=raw_score,
                     ))
-            except Exception as e:
-                logger.error(f"FMP fetch error: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"FMP fetch error: {e}")
 
         self._last_fetch = datetime.now(timezone.utc)
         return self._deduplicate(articles)

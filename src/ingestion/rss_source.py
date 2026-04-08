@@ -8,6 +8,7 @@ Sources:
 - SEC EDGAR RSS (8-K filings)
 """
 
+import asyncio
 import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -70,10 +71,9 @@ class RSSSource(NewsSource):
     async def fetch(self, tickers: list[str]) -> list[NewsArticle]:
         articles = []
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 async with session.get(
                     self.feed_url,
-                    timeout=aiohttp.ClientTimeout(total=15),
                     headers={"User-Agent": "NewsTradingBot/1.0"},
                 ) as resp:
                     if resp.status != 200:
@@ -116,6 +116,8 @@ class RSSSource(NewsSource):
                     raw_sentiment_score=None,
                 ))
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"RSS {self.name} fetch error: {e}")
 

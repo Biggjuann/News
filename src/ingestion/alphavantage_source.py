@@ -5,6 +5,7 @@ Returns GPT-scored sentiment per article with ticker-level granularity.
 https://www.alphavantage.co/documentation/#news-sentiment
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -40,8 +41,8 @@ class AlphaVantageSource(NewsSource):
         articles = []
         ticker_str = ",".join(tickers[:5])  # AV supports comma-separated, limit to 5
 
-        async with aiohttp.ClientSession() as session:
-            try:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 params = {
                     "function": "NEWS_SENTIMENT",
                     "tickers": ticker_str,
@@ -49,9 +50,7 @@ class AlphaVantageSource(NewsSource):
                     "limit": 20,
                     "apikey": settings.alpha_vantage_api_key,
                 }
-                async with session.get(
-                    self.BASE_URL, params=params, timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
+                async with session.get(self.BASE_URL, params=params) as resp:
                     if resp.status != 200:
                         logger.warning(f"Alpha Vantage returned {resp.status}")
                         return []
@@ -60,7 +59,6 @@ class AlphaVantageSource(NewsSource):
                 self._request_count += 1
 
                 for item in data.get("feed", []):
-                    # Extract ticker-specific sentiment scores
                     ticker_sentiments = {}
                     for ts in item.get("ticker_sentiment", []):
                         ticker_sentiments[ts["ticker"]] = float(ts.get("ticker_sentiment_score", 0))
@@ -70,7 +68,6 @@ class AlphaVantageSource(NewsSource):
                         if t in ticker_sentiments
                     ]
 
-                    # Use the average of matched ticker sentiments as raw score
                     raw_score = None
                     if matched_tickers:
                         scores = [ticker_sentiments[t] for t in matched_tickers]
@@ -78,7 +75,6 @@ class AlphaVantageSource(NewsSource):
                     elif "overall_sentiment_score" in item:
                         raw_score = float(item["overall_sentiment_score"])
 
-                    # Parse datetime
                     pub_str = item.get("time_published", "")
                     try:
                         pub_dt = datetime.strptime(pub_str, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
@@ -94,8 +90,10 @@ class AlphaVantageSource(NewsSource):
                         published_at=pub_dt,
                         raw_sentiment_score=raw_score,
                     ))
-            except Exception as e:
-                logger.error(f"Alpha Vantage fetch error: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Alpha Vantage fetch error: {e}")
 
         self._last_fetch = datetime.now(timezone.utc)
         return self._deduplicate(articles)
