@@ -3,8 +3,10 @@ Signal aggregation engine.
 
 Takes scored articles and produces trading signals by:
 1. Grouping by ticker
-2. Weighting by confidence, impact, and recency
-3. Generating BUY/SELL/NEUTRAL signals when thresholds are crossed
+2. Requiring multiple sources to confirm a direction
+3. Weighting by confidence, impact, and recency
+4. Enforcing cooldowns to prevent signal flipping
+5. Generating BUY/SELL signals only when conviction is strong
 """
 
 import logging
@@ -12,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
 from config.settings import settings
-from src.models import ScoredArticle, TradingSignal, SignalDirection, Impact
+from src.models import ScoredArticle, TradingSignal, SignalDirection, Impact, Sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,10 @@ class SignalAggregator:
         self._article_buffer: dict[str, list[ScoredArticle]] = defaultdict(list)
         # Most recent signal per ticker
         self.active_signals: dict[str, TradingSignal] = {}
+        # Cooldown tracking: ticker → last signal time
+        self._last_signal_time: dict[str, datetime] = {}
+        # Track last signal direction for flip detection
+        self._last_direction: dict[str, SignalDirection] = {}
 
     def ingest(self, scored_articles: list[ScoredArticle]):
         """Add scored articles to the rolling buffer."""
@@ -63,13 +69,18 @@ class SignalAggregator:
             if not articles:
                 continue
 
-            # Weighted sentiment calculation
+            # --- FILTER 1: Minimum source count ---
+            if len(articles) < settings.min_sources:
+                continue
+
+            # --- Calculate weighted sentiment ---
             total_weight = 0.0
             weighted_score = 0.0
             headlines = []
+            bullish_count = 0
+            bearish_count = 0
 
             for sa in articles:
-                # Weight = confidence × impact_weight × recency_decay
                 age_seconds = (now - sa.scored_at).total_seconds()
                 recency = max(0.1, 1.0 - (age_seconds / settings.signal_expiry_seconds))
                 weight = sa.confidence * IMPACT_WEIGHT[sa.impact] * recency
@@ -78,19 +89,71 @@ class SignalAggregator:
                 total_weight += weight
                 headlines.append(sa.article.headline[:100])
 
+                if sa.sentiment == Sentiment.BULLISH:
+                    bullish_count += 1
+                elif sa.sentiment == Sentiment.BEARISH:
+                    bearish_count += 1
+
             if total_weight == 0:
                 continue
 
             avg_sentiment = weighted_score / total_weight
             avg_confidence = sum(sa.confidence for sa in articles) / len(articles)
 
-            # Determine direction
+            # --- FILTER 2: Sentiment agreement ---
+            # Require a supermajority of articles to agree on direction
+            total_directional = bullish_count + bearish_count
+            if total_directional > 0:
+                if avg_sentiment > 0:
+                    agreement = bullish_count / total_directional
+                else:
+                    agreement = bearish_count / total_directional
+            else:
+                agreement = 0.0
+
+            if agreement < settings.min_agreement:
+                continue
+
+            # --- Determine direction ---
             if avg_sentiment >= settings.buy_signal_threshold and avg_confidence >= settings.min_confidence:
                 direction = SignalDirection.BUY
             elif avg_sentiment <= settings.sell_signal_threshold and avg_confidence >= settings.min_confidence:
                 direction = SignalDirection.SELL
             else:
                 direction = SignalDirection.NEUTRAL
+
+            if direction == SignalDirection.NEUTRAL:
+                self.active_signals[ticker] = TradingSignal(
+                    ticker=ticker,
+                    direction=direction,
+                    strength=min(abs(avg_sentiment), 1.0),
+                    sentiment_score=round(avg_sentiment, 4),
+                    confidence=round(avg_confidence, 4),
+                    source_count=len(articles),
+                    headlines=headlines[:5],
+                    created_at=now,
+                    expires_at=now + timedelta(seconds=settings.signal_expiry_seconds),
+                )
+                continue
+
+            # --- FILTER 3: Cooldown ---
+            last_time = self._last_signal_time.get(ticker)
+            if last_time:
+                elapsed = (now - last_time).total_seconds()
+                last_dir = self._last_direction.get(ticker)
+
+                # If flipping direction (BUY→SELL or SELL→BUY), require longer cooldown
+                if last_dir and last_dir != direction:
+                    if elapsed < settings.signal_flip_cooldown_seconds:
+                        logger.debug(
+                            f"Suppressed {direction.value} {ticker}: "
+                            f"flip cooldown ({elapsed:.0f}s < {settings.signal_flip_cooldown_seconds}s)"
+                        )
+                        continue
+                else:
+                    # Same direction repeat — shorter cooldown
+                    if elapsed < settings.signal_cooldown_seconds:
+                        continue
 
             signal = TradingSignal(
                 ticker=ticker,
@@ -99,7 +162,7 @@ class SignalAggregator:
                 sentiment_score=round(avg_sentiment, 4),
                 confidence=round(avg_confidence, 4),
                 source_count=len(articles),
-                headlines=headlines[:5],  # top 5 headlines
+                headlines=headlines[:5],
                 created_at=now,
                 expires_at=now + timedelta(seconds=settings.signal_expiry_seconds),
             )
@@ -107,13 +170,14 @@ class SignalAggregator:
             # Only emit if direction changed or it's a new signal
             existing = self.active_signals.get(ticker)
             if existing is None or existing.direction != direction:
-                if direction != SignalDirection.NEUTRAL:
-                    logger.info(
-                        f"SIGNAL: {direction.value} {ticker} | "
-                        f"sentiment={avg_sentiment:.3f} confidence={avg_confidence:.3f} "
-                        f"sources={len(articles)}"
-                    )
-                    new_signals.append(signal)
+                logger.info(
+                    f"SIGNAL: {direction.value} {ticker} | "
+                    f"sentiment={avg_sentiment:.3f} confidence={avg_confidence:.3f} "
+                    f"sources={len(articles)} agreement={agreement:.0%}"
+                )
+                new_signals.append(signal)
+                self._last_signal_time[ticker] = now
+                self._last_direction[ticker] = direction
 
             self.active_signals[ticker] = signal
 

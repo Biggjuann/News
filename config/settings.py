@@ -34,10 +34,16 @@ class Settings(BaseSettings):
 
     # --- Signal thresholds ---
     # Sentiment score range: -1.0 (extreme bearish) to +1.0 (extreme bullish)
-    buy_signal_threshold: float = 0.4
-    sell_signal_threshold: float = -0.4
-    min_confidence: float = 0.6  # minimum confidence to act on a signal
-    signal_expiry_seconds: int = 300  # signals expire after 5 minutes
+    buy_signal_threshold: float = 0.5
+    sell_signal_threshold: float = -0.5
+    min_confidence: float = 0.7  # minimum confidence to act on a signal
+    signal_expiry_seconds: int = 600  # signals expire after 10 minutes
+
+    # --- Signal quality filters ---
+    min_sources: int = 2  # minimum articles required to trigger a signal
+    min_agreement: float = 0.65  # 65% of articles must agree on direction
+    signal_cooldown_seconds: int = 300  # 5 min cooldown before repeating same signal
+    signal_flip_cooldown_seconds: int = 900  # 15 min cooldown before flipping BUY↔SELL
 
     # --- Server ---
     host: str = "0.0.0.0"

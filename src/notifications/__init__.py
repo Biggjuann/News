@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+from config.settings import settings
 from src.models import TradingSignal, SignalDirection
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,11 @@ class DiscordNotifier:
                 {
                     "name": "Sources",
                     "value": f"`{signal.source_count} articles`",
+                    "inline": True,
+                },
+                {
+                    "name": "Min Required",
+                    "value": f"`{settings.min_sources} sources, {settings.min_agreement:.0%} agreement`",
                     "inline": True,
                 },
                 {
