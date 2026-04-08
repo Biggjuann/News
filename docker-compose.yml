@@ -1,0 +1,10 @@
+services:
+  signals:
+    build: .
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./server.log:/app/server.log
