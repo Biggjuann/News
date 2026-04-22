@@ -22,15 +22,14 @@ class Settings(BaseSettings):
 
     # --- Tickers to monitor ---
     watch_tickers: list[str] = Field(
-        default=["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ", "ES"],
-        description="Tickers to monitor for news"
+        default=["SPY"],
+        description="Tickers to monitor (SPY for political signals)"
     )
 
     # --- Polling intervals (seconds) ---
-    finnhub_poll_interval: int = 30
-    alpha_vantage_poll_interval: int = 300  # conservative due to 25/day free limit
-    fmp_poll_interval: int = 60
-    rss_poll_interval: int = 60
+    truth_social_poll_interval: int = 30  # check Trump posts every 30s
+    x_poll_interval: int = 30  # check X posts every 30s
+    whitehouse_poll_interval: int = 60  # check White House every 60s
 
     # --- Signal thresholds ---
     # Sentiment score range: -1.0 (extreme bearish) to +1.0 (extreme bullish)

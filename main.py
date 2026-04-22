@@ -1,14 +1,12 @@
 """
-News Trading Signal System — Main Orchestrator
+Trump/White House → SPY Signal Engine
 
-Pipeline: Fetch → Score → Aggregate → Serve via API → Discord alerts
+Pipeline: Trump posts + WH briefings → LLM scoring → Signal → Discord alerts
 
-Runs:
-1. Async news fetchers on configurable intervals
-2. Sentiment scoring (pre-scored + LLM fallback)
-3. Signal aggregation with weighted scoring
-4. FastAPI server exposing signals for TradingView
-5. Discord webhook notifications for BUY/SELL signals
+Sources:
+- Trump Truth Social posts
+- Trump/POTUS/WhiteHouse X posts
+- White House official briefings and statements
 """
 
 import asyncio
@@ -19,10 +17,9 @@ import sys
 import uvicorn
 
 from config.settings import settings
-from src.ingestion.finnhub_source import FinnhubSource, FinnhubSentimentSource
-from src.ingestion.alphavantage_source import AlphaVantageSource
-from src.ingestion.fmp_source import FMPSource
-from src.ingestion.rss_source import create_rss_sources
+from src.ingestion.truth_social_source import TruthSocialSource
+from src.ingestion.x_source import XSource
+from src.ingestion.whitehouse_source import create_whitehouse_sources
 from src.scoring.scorer import SentimentScorer
 from src.signals.aggregator import SignalAggregator
 from src.notifications import DiscordNotifier
@@ -50,20 +47,21 @@ class NewsSignalEngine:
         else:
             logger.warning("Discord notifications: DISABLED (no webhook URL)")
 
-        # Initialize all configured sources
+        # Initialize political news sources
         self.sources = []
-        for source_cls in [FinnhubSource, FinnhubSentimentSource, AlphaVantageSource, FMPSource]:
-            source = source_cls()
-            if source.is_configured:
-                self.sources.append(source)
-                logger.info(f"Enabled source: {source.name}")
-            else:
-                logger.warning(f"Skipped source (no API key): {source.name}")
 
-        # RSS sources are always available (free, no key needed)
-        rss_sources = create_rss_sources()
-        self.sources.extend(rss_sources)
-        for s in rss_sources:
+        # Trump Truth Social
+        self.sources.append(TruthSocialSource())
+        logger.info("Enabled source: Truth Social (@realDonaldTrump)")
+
+        # Trump / POTUS / WhiteHouse X accounts
+        self.sources.append(XSource())
+        logger.info("Enabled source: X (@realDonaldTrump, @POTUS, @WhiteHouse)")
+
+        # White House official feeds
+        wh_sources = create_whitehouse_sources()
+        self.sources.extend(wh_sources)
+        for s in wh_sources:
             logger.info(f"Enabled source: {s.name}")
 
         set_aggregator(self.aggregator)
@@ -111,21 +109,19 @@ class NewsSignalEngine:
     def get_interval(self, source) -> int:
         """Get the polling interval for a source."""
         name = source.name.lower()
-        if "finnhub" in name:
-            return settings.finnhub_poll_interval
-        elif "alpha_vantage" in name:
-            return settings.alpha_vantage_poll_interval
-        elif "fmp" in name:
-            return settings.fmp_poll_interval
+        if "truth" in name:
+            return settings.truth_social_poll_interval
+        elif "x_" in name or "twitter" in name:
+            return settings.x_poll_interval
         else:
-            return settings.rss_poll_interval
+            return settings.whitehouse_poll_interval
 
     async def start(self):
         """Start all source loops and the API server."""
         # Log key loading status (masked)
         from config.settings import ENV_FILE
         logger.info(f"Loading .env from: {ENV_FILE} (exists: {ENV_FILE.exists()})")
-        for name in ["finnhub_api_key", "alpha_vantage_api_key", "fmp_api_key", "anthropic_api_key"]:
+        for name in ["anthropic_api_key", "discord_webhook_url"]:
             val = getattr(settings, name, "")
             status = f"{val[:4]}***{val[-4:]}" if len(val) > 8 else ("SET" if val else "NOT SET")
             logger.info(f"  {name}: {status}")

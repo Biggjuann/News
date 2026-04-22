@@ -1,8 +1,8 @@
 """
-Two-layer sentiment scoring engine.
+Sentiment scoring engine for political/policy news → SPY impact.
 
-Layer 1: Use pre-scored sentiment from sources that provide it (Alpha Vantage, FMP).
-Layer 2: For unscored headlines (Finnhub, RSS), use Claude Haiku for fast classification.
+Uses Claude Haiku to classify Trump posts, White House statements,
+and policy announcements for their market impact on SPY/S&P 500.
 """
 
 import json
@@ -16,25 +16,45 @@ from src.models import NewsArticle, ScoredArticle, Sentiment, Impact
 
 logger = logging.getLogger(__name__)
 
-LLM_PROMPT = """You are a financial news sentiment classifier. Analyze the following headline and summary for market sentiment.
+LLM_PROMPT = """You are an expert at analyzing political statements and policy announcements for their impact on the S&P 500 (SPY).
 
-Headline: {headline}
-Summary: {summary}
-Related tickers: {tickers}
+Source: {source}
+Post/Statement: {headline}
+Additional context: {summary}
 
-Respond with ONLY a JSON object (no markdown, no explanation):
+Analyze this for its likely IMMEDIATE impact on SPY. Respond with ONLY a JSON object:
 {{
   "sentiment": "bullish" | "bearish" | "neutral",
   "score": <float from -1.0 to 1.0>,
   "confidence": <float from 0.0 to 1.0>,
-  "impact": "high" | "medium" | "low"
+  "impact": "high" | "medium" | "low",
+  "reasoning": "<one sentence why>"
 }}
 
-Rules:
-- score: -1.0 = extremely bearish, 0.0 = neutral, 1.0 = extremely bullish
-- confidence: how confident you are in the classification
-- impact: "high" for earnings, Fed decisions, major geopolitical events; "medium" for analyst upgrades/downgrades, sector moves; "low" for routine news
-- Be decisive. Most financial news is NOT neutral — lean into the direction."""
+Scoring guide for political/policy news → SPY:
+BULLISH (+0.3 to +1.0):
+- Tariff reductions, trade deals, deregulation
+- Tax cuts, pro-business executive orders
+- Peace deals, ceasefire agreements
+- Positive economic commentary ("economy is great", "markets will boom")
+- Fed pressure for rate cuts
+
+BEARISH (-0.3 to -1.0):
+- New tariffs, trade war escalation, sanctions
+- Government shutdown threats, debt ceiling issues
+- Military action, geopolitical escalation
+- Attacks on companies, sectors, or the Fed
+- Regulatory crackdowns, antitrust threats
+
+NEUTRAL (-0.2 to +0.2):
+- Personal attacks on political opponents (no market impact)
+- Routine ceremonial posts, holidays, rallies
+- Restatements of known policy positions
+- Social/cultural commentary with no economic angle
+
+Set confidence LOW (0.2-0.4) if the post is vague or could be interpreted multiple ways.
+Set confidence HIGH (0.7-0.9) if the post contains specific policy actions or clear economic implications.
+Set impact to "high" ONLY for concrete policy actions (tariffs, executive orders, deals). Vague promises are "medium" at best."""
 
 
 class SentimentScorer:
@@ -93,9 +113,9 @@ class SentimentScorer:
     async def _score_with_llm(self, article: NewsArticle) -> ScoredArticle:
         """Use Claude Haiku to classify sentiment."""
         prompt = LLM_PROMPT.format(
+            source=article.source,
             headline=article.headline,
-            summary=article.summary[:300],
-            tickers=", ".join(article.tickers) if article.tickers else "unknown",
+            summary=article.summary[:300] if article.summary else "No additional context",
         )
 
         try:
