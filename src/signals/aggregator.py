@@ -24,6 +24,23 @@ IMPACT_WEIGHT = {
     Impact.LOW: 1.0,
 }
 
+# Trusted source prefixes that can trigger single-source signals.
+# Trump's direct posts ARE the signal — don't require corroboration.
+TRUSTED_SINGLE_SOURCE_PREFIXES = (
+    "trump_truth_social",
+    "x_realDonaldTrump",
+    "x_POTUS",
+    "x_WhiteHouse",
+    "wh_briefing",
+    "wh_presidential",
+    "wh_statements",
+)
+
+
+def _is_trusted_source(source_name: str) -> bool:
+    """Check if this source is trusted enough for single-source signals."""
+    return any(source_name.startswith(p) for p in TRUSTED_SINGLE_SOURCE_PREFIXES)
+
 
 class SignalAggregator:
     def __init__(self):
@@ -70,7 +87,16 @@ class SignalAggregator:
                 continue
 
             # --- FILTER 1: Minimum source count ---
-            if len(articles) < settings.min_sources:
+            # Exception: trusted political sources (Trump posts, WH statements)
+            # can trigger signals alone IF they have high confidence + impact.
+            has_trusted_solo = any(
+                _is_trusted_source(sa.article.source)
+                and sa.confidence >= settings.trusted_solo_min_confidence
+                and sa.impact == Impact.HIGH
+                for sa in articles
+            )
+
+            if len(articles) < settings.min_sources and not has_trusted_solo:
                 continue
 
             # --- Calculate weighted sentiment ---
@@ -111,7 +137,8 @@ class SignalAggregator:
             else:
                 agreement = 0.0
 
-            if agreement < settings.min_agreement:
+            # Skip agreement check for trusted solo signals
+            if agreement < settings.min_agreement and not has_trusted_solo:
                 continue
 
             # --- Determine direction ---

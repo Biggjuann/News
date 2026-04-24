@@ -17,6 +17,7 @@ import sys
 import uvicorn
 
 from config.settings import settings
+from src.ingestion.truth_social_api import TruthSocialAPISource
 from src.ingestion.truth_social_source import TruthSocialSource
 from src.ingestion.x_source import XSource
 from src.ingestion.whitehouse_source import create_whitehouse_sources
@@ -50,9 +51,12 @@ class NewsSignalEngine:
         # Initialize political news sources
         self.sources = []
 
-        # Trump Truth Social
+        # Trump Truth Social — direct API (primary) + RSS bridge (backup)
+        self.sources.append(TruthSocialAPISource())
+        logger.info("Enabled source: Truth Social API (@realDonaldTrump, direct)")
+
         self.sources.append(TruthSocialSource())
-        logger.info("Enabled source: Truth Social (@realDonaldTrump)")
+        logger.info("Enabled source: Truth Social RSS (@realDonaldTrump, backup)")
 
         # Trump / POTUS / WhiteHouse X accounts
         self.sources.append(XSource())

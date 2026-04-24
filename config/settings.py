@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     signal_cooldown_seconds: int = 300  # 5 min cooldown before repeating same signal
     signal_flip_cooldown_seconds: int = 900  # 15 min cooldown before flipping BUY↔SELL
 
+    # Trusted sources (Trump posts, WH statements) can trigger signals alone
+    # if they meet this confidence threshold AND have HIGH impact.
+    trusted_solo_min_confidence: float = 0.7
+
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8080
