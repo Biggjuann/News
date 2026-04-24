@@ -1,12 +1,12 @@
 """
 Trump/White House → SPY Signal Engine
 
-Pipeline: Trump posts + WH briefings → LLM scoring → Signal → Discord alerts
+Pipeline: Political news → LLM scoring → Signal → Discord alerts
 
-Sources:
-- Trump Truth Social posts
-- Trump/POTUS/WhiteHouse X posts
-- White House official briefings and statements
+Sources (layered for reliability):
+1. Direct: Truth Social API, White House RSS (may be blocked by some hosts)
+2. Filtered: Finnhub + Alpha Vantage general news, filtered for political keywords
+3. Search: Google News RSS with political search queries
 """
 
 import asyncio
@@ -21,6 +21,10 @@ from src.ingestion.truth_social_api import TruthSocialAPISource
 from src.ingestion.truth_social_source import TruthSocialSource
 from src.ingestion.x_source import XSource
 from src.ingestion.whitehouse_source import create_whitehouse_sources
+from src.ingestion.google_news_political import create_google_political_sources
+from src.ingestion.finnhub_source import FinnhubSource, FinnhubSentimentSource
+from src.ingestion.alphavantage_source import AlphaVantageSource
+from src.ingestion.political_filter import PoliticalFilter
 from src.scoring.scorer import SentimentScorer
 from src.signals.aggregator import SignalAggregator
 from src.notifications import DiscordNotifier
@@ -48,25 +52,28 @@ class NewsSignalEngine:
         else:
             logger.warning("Discord notifications: DISABLED (no webhook URL)")
 
-        # Initialize political news sources
         self.sources = []
 
-        # Trump Truth Social — direct API (primary) + RSS bridge (backup)
+        # --- Layer 1: Direct sources (may be blocked on some hosts) ---
         self.sources.append(TruthSocialAPISource())
-        logger.info("Enabled source: Truth Social API (@realDonaldTrump, direct)")
-
         self.sources.append(TruthSocialSource())
-        logger.info("Enabled source: Truth Social RSS (@realDonaldTrump, backup)")
-
-        # Trump / POTUS / WhiteHouse X accounts
         self.sources.append(XSource())
-        logger.info("Enabled source: X (@realDonaldTrump, @POTUS, @WhiteHouse)")
-
-        # White House official feeds
         wh_sources = create_whitehouse_sources()
         self.sources.extend(wh_sources)
-        for s in wh_sources:
-            logger.info(f"Enabled source: {s.name}")
+        logger.info("Layer 1 (direct): Truth Social, X, White House feeds")
+
+        # --- Layer 2: Reliable news APIs filtered for political keywords ---
+        for source_cls in [FinnhubSource, FinnhubSentimentSource, AlphaVantageSource]:
+            source = source_cls()
+            if source.is_configured:
+                filtered = PoliticalFilter(source)
+                self.sources.append(filtered)
+                logger.info(f"Layer 2 (filtered): {source.name} → political filter")
+
+        # --- Layer 3: Google News political search (always free) ---
+        google_sources = create_google_political_sources()
+        self.sources.extend(google_sources)
+        logger.info(f"Layer 3 (search): {len(google_sources)} Google News political feeds")
 
         set_aggregator(self.aggregator)
 
@@ -88,7 +95,6 @@ class NewsSignalEngine:
                     f"NEW SIGNAL: {sig.direction.value} {sig.ticker} "
                     f"strength={sig.strength:.2f} confidence={sig.confidence:.2f}"
                 )
-                # Push to Discord
                 await self.discord.send_signal(sig)
 
         except asyncio.CancelledError:
@@ -117,45 +123,47 @@ class NewsSignalEngine:
             return settings.truth_social_poll_interval
         elif "x_" in name or "twitter" in name:
             return settings.x_poll_interval
+        elif "google" in name:
+            return 60
+        elif "political_finnhub" in name:
+            return settings.finnhub_poll_interval
+        elif "political_alpha" in name:
+            return settings.alpha_vantage_poll_interval
         else:
             return settings.whitehouse_poll_interval
 
     async def start(self):
         """Start all source loops and the API server."""
-        # Log key loading status (masked)
         from config.settings import ENV_FILE
         logger.info(f"Loading .env from: {ENV_FILE} (exists: {ENV_FILE.exists()})")
-        for name in ["anthropic_api_key", "discord_webhook_url"]:
+        for name in ["finnhub_api_key", "alpha_vantage_api_key", "anthropic_api_key", "discord_webhook_url"]:
             val = getattr(settings, name, "")
             status = f"{val[:4]}***{val[-4:]}" if len(val) > 8 else ("SET" if val else "NOT SET")
             logger.info(f"  {name}: {status}")
 
         logger.info("=" * 60)
-        logger.info("NEWS TRADING SIGNAL ENGINE STARTING")
-        logger.info(f"Watching tickers: {settings.watch_tickers}")
-        logger.info(f"Active sources: {[s.name for s in self.sources]}")
+        logger.info("TRUMP/WHITE HOUSE → SPY SIGNAL ENGINE")
+        logger.info(f"Watching: {settings.watch_tickers}")
+        logger.info(f"Sources: {len(self.sources)} total")
         logger.info(f"Buy threshold: {settings.buy_signal_threshold}")
         logger.info(f"Sell threshold: {settings.sell_signal_threshold}")
         logger.info(f"API server: http://{settings.host}:{settings.port}")
         logger.info("=" * 60)
 
-        # Send Discord startup notification
         await self.discord.send_startup(
             settings.watch_tickers,
             [s.name for s in self.sources],
         )
 
-        # Start source fetch loops
         tasks = []
         for source in self.sources:
             interval = self.get_interval(source)
-            logger.info(f"Starting {source.name} loop (every {interval}s)")
+            logger.info(f"Starting {source.name} (every {interval}s)")
             tasks.append(asyncio.create_task(
                 self.run_source_loop(source, interval),
                 name=f"source_{source.name}",
             ))
 
-        # Start API server
         config = uvicorn.Config(
             app,
             host=settings.host,
@@ -164,17 +172,14 @@ class NewsSignalEngine:
         )
         server = uvicorn.Server(config)
 
-        # Handle shutdown gracefully
         loop = asyncio.get_event_loop()
         for sig_name in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig_name, lambda: asyncio.create_task(self.shutdown(tasks, server)))
 
         tasks.append(asyncio.create_task(server.serve(), name="uvicorn"))
-
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def shutdown(self, tasks, server):
-        """Gracefully shut down all tasks."""
         logger.info("Shutting down...")
         self._shutdown = True
         server.should_exit = True
