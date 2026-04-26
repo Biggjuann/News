@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     truth_social_poll_interval: int = 30  # check Trump posts every 30s
     x_poll_interval: int = 30  # check X posts every 30s
     whitehouse_poll_interval: int = 60  # check White House every 60s
-    finnhub_poll_interval: int = 60  # Finnhub political-filtered news
+    finnhub_poll_interval: int = 30  # Finnhub political-filtered news
     alpha_vantage_poll_interval: int = 300  # Alpha Vantage (25/day free limit)
 
     # --- Signal thresholds ---

@@ -17,10 +17,6 @@ import sys
 import uvicorn
 
 from config.settings import settings
-from src.ingestion.truth_social_api import TruthSocialAPISource
-from src.ingestion.truth_social_source import TruthSocialSource
-from src.ingestion.x_source import XSource
-from src.ingestion.whitehouse_source import create_whitehouse_sources
 from src.ingestion.google_news_political import create_google_political_sources
 from src.ingestion.finnhub_source import FinnhubSource, FinnhubSentimentSource
 from src.ingestion.alphavantage_source import AlphaVantageSource
@@ -54,21 +50,13 @@ class NewsSignalEngine:
 
         self.sources = []
 
-        # --- Layer 1: Direct sources (may be blocked on some hosts) ---
-        self.sources.append(TruthSocialAPISource())
-        self.sources.append(TruthSocialSource())
-        self.sources.append(XSource())
-        wh_sources = create_whitehouse_sources()
-        self.sources.extend(wh_sources)
-        logger.info("Layer 1 (direct): Truth Social, X, White House feeds")
-
-        # --- Layer 2: Reliable news APIs filtered for political keywords ---
+        # --- Finnhub + Alpha Vantage, filtered for political keywords ---
         for source_cls in [FinnhubSource, FinnhubSentimentSource, AlphaVantageSource]:
             source = source_cls()
             if source.is_configured:
                 filtered = PoliticalFilter(source)
                 self.sources.append(filtered)
-                logger.info(f"Layer 2 (filtered): {source.name} → political filter")
+                logger.info(f"Enabled: {source.name} → political filter")
 
         # --- Layer 3: Google News political search (always free) ---
         google_sources = create_google_political_sources()
