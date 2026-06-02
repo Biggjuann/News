@@ -1,9 +1,10 @@
 """
 Sentiment scoring engine for news → stock impact.
 
-Handles two types of news:
+Handles three types of news:
 1. Political/policy news → SPY impact
 2. Jensen Huang / Nvidia ecosystem news → per-ticker impact
+3. Trump company callouts → per-ticker impact
 """
 
 import json
@@ -79,6 +80,46 @@ NEUTRAL (-0.2 to +0.2):
 Set confidence HIGH when Jensen specifically names a company with a concrete action (deal, partnership, order).
 Set confidence LOW for generic commentary or when the connection to a ticker is indirect."""
 
+TRUMP_COMPANY_PROMPT = """You are an expert at analyzing how Donald Trump's comments about specific companies affect their stock prices. Trump's praise or criticism of companies regularly moves stocks 5-15%.
+
+Source: {source}
+Headline: {headline}
+Context: {summary}
+Tickers mentioned: {tickers}
+
+Analyze this for its likely impact on the mentioned tickers. Respond with ONLY a JSON object:
+{{
+  "sentiment": "bullish" | "bearish" | "neutral",
+  "score": <float from -1.0 to 1.0>,
+  "confidence": <float from 0.0 to 1.0>,
+  "impact": "high" | "medium" | "low",
+  "reasoning": "<one sentence why>"
+}}
+
+Scoring guide for Trump company callouts:
+BULLISH (+0.3 to +1.0):
+- Trump praises a company ("great American company", "doing tremendous things")
+- Announces a company is building factories/creating jobs in the US
+- Company announces deal/investment after meeting with Trump
+- Trump says he'll help/protect an industry that benefits the company
+- Trump picks a company for a government contract or project
+
+BEARISH (-0.3 to -1.0):
+- Trump attacks/threatens a company ("ripping off America", "they should be ashamed")
+- Threatens tariffs or bans specifically targeting a company
+- Calls for boycott or says he'll "go after" a company
+- Threatens antitrust action or regulatory crackdown on a company
+- Company defies Trump and he retaliates publicly
+
+NEUTRAL (-0.2 to +0.2):
+- Passing mention without clear positive/negative tone
+- Company mentioned in policy context without direct praise/attack
+- Old news about a company Trump previously commented on
+
+Set impact "high" when Trump DIRECTLY names a company with a clear action/threat/praise.
+Set confidence HIGH (0.8+) when Trump explicitly names the company with strong language.
+Set confidence LOW when the company connection is indirect or the article is speculative."""
+
 
 class SentimentScorer:
     def __init__(self):
@@ -135,8 +176,16 @@ class SentimentScorer:
 
     def _pick_prompt(self, article: NewsArticle) -> str:
         """Select the right prompt template based on article source."""
-        is_jensen = "jensen" in article.source.lower() or "jensen" in article.headline.lower()
-        template = JENSEN_PROMPT if is_jensen else POLITICAL_PROMPT
+        source_lower = article.source.lower()
+        headline_lower = article.headline.lower()
+        is_jensen = "jensen" in source_lower or "jensen" in headline_lower
+        is_trump_co = "trump_co" in source_lower or "[trump/co]" in headline_lower
+        if is_jensen:
+            template = JENSEN_PROMPT
+        elif is_trump_co:
+            template = TRUMP_COMPANY_PROMPT
+        else:
+            template = POLITICAL_PROMPT
         return template.format(
             source=article.source,
             headline=article.headline,

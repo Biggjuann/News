@@ -33,6 +33,7 @@ TRUSTED_SINGLE_SOURCE_PREFIXES = (
     "wh_presidential",
     "wh_statements",
     "jensen_",
+    "trump_co_",
 )
 
 

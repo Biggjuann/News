@@ -1,14 +1,16 @@
 """
 News Trading Signal Engine
 
-Two monitors:
+Three monitors:
 1. Political/Trump news → SPY signals
 2. Jensen Huang / Nvidia ecosystem → per-ticker signals
+3. Trump company callouts → per-ticker signals
 
 Sources:
 - Finnhub + Alpha Vantage → political keyword filter → SPY
 - Google News political search → SPY
 - Google News Jensen Huang search → NVDA + mentioned tickers
+- Google News Trump company callouts → mentioned tickers
 """
 
 import asyncio
@@ -21,6 +23,7 @@ import uvicorn
 from config.settings import settings
 from src.ingestion.google_news_political import create_google_political_sources
 from src.ingestion.jensen_huang_source import create_jensen_sources
+from src.ingestion.trump_companies_source import create_trump_company_sources
 from src.ingestion.finnhub_source import FinnhubSource, FinnhubSentimentSource
 from src.ingestion.alphavantage_source import AlphaVantageSource
 from src.ingestion.political_filter import PoliticalFilter
@@ -70,6 +73,11 @@ class NewsSignalEngine:
         self.sources.extend(jensen_sources)
         logger.info(f"Jensen/NVDA: {len(jensen_sources)} Google News search feeds → multi-ticker")
 
+        # --- Trump company callouts → per-ticker ---
+        trump_co_sources = create_trump_company_sources()
+        self.sources.extend(trump_co_sources)
+        logger.info(f"Trump/Co: {len(trump_co_sources)} Google News search feeds → multi-ticker")
+
         set_aggregator(self.aggregator)
 
     async def fetch_and_process(self, source):
@@ -114,8 +122,8 @@ class NewsSignalEngine:
     def get_interval(self, source) -> int:
         """Get the polling interval for a source."""
         name = source.name.lower()
-        if "jensen" in name:
-            return 60  # check Jensen news every 60s
+        if "jensen" in name or "trump_co" in name:
+            return 60
         elif "google" in name:
             return 60
         elif "political_finnhub" in name:
@@ -135,7 +143,7 @@ class NewsSignalEngine:
             logger.info(f"  {name}: {status}")
 
         logger.info("=" * 60)
-        logger.info("NEWS TRADING SIGNAL ENGINE (Political + Jensen/NVDA)")
+        logger.info("NEWS TRADING SIGNAL ENGINE (Political + Jensen + Trump/Co)")
         logger.info(f"Watching: {settings.watch_tickers}")
         logger.info(f"Sources: {len(self.sources)} total")
         logger.info(f"Buy threshold: {settings.buy_signal_threshold}")
