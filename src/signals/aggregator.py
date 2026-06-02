@@ -24,8 +24,6 @@ IMPACT_WEIGHT = {
     Impact.LOW: 1.0,
 }
 
-# Trusted source prefixes that can trigger single-source signals.
-# Trump's direct posts ARE the signal — don't require corroboration.
 TRUSTED_SINGLE_SOURCE_PREFIXES = (
     "trump_truth_social",
     "x_realDonaldTrump",
@@ -34,6 +32,7 @@ TRUSTED_SINGLE_SOURCE_PREFIXES = (
     "wh_briefing",
     "wh_presidential",
     "wh_statements",
+    "jensen_",
 )
 
 
@@ -44,13 +43,9 @@ def _is_trusted_source(source_name: str) -> bool:
 
 class SignalAggregator:
     def __init__(self):
-        # Rolling window of scored articles per ticker
         self._article_buffer: dict[str, list[ScoredArticle]] = defaultdict(list)
-        # Most recent signal per ticker
         self.active_signals: dict[str, TradingSignal] = {}
-        # Cooldown tracking: ticker → last signal time
         self._last_signal_time: dict[str, datetime] = {}
-        # Track last signal direction for flip detection
         self._last_direction: dict[str, SignalDirection] = {}
 
     def ingest(self, scored_articles: list[ScoredArticle]):
@@ -62,7 +57,6 @@ class SignalAggregator:
             for ticker in sa.article.tickers:
                 self._article_buffer[ticker].append(sa)
 
-        # Prune expired articles from all buffers
         for ticker in list(self._article_buffer.keys()):
             self._article_buffer[ticker] = [
                 sa for sa in self._article_buffer[ticker]
@@ -71,7 +65,6 @@ class SignalAggregator:
             if not self._article_buffer[ticker]:
                 del self._article_buffer[ticker]
 
-        # Prune expired signals
         for ticker in list(self.active_signals.keys()):
             sig = self.active_signals[ticker]
             if sig.expires_at and sig.expires_at < now:
@@ -86,9 +79,6 @@ class SignalAggregator:
             if not articles:
                 continue
 
-            # --- FILTER 1: Minimum source count ---
-            # Exception: trusted political sources (Trump posts, WH statements)
-            # can trigger signals alone IF they have high confidence + impact.
             has_trusted_solo = any(
                 _is_trusted_source(sa.article.source)
                 and sa.confidence >= settings.trusted_solo_min_confidence
@@ -99,7 +89,6 @@ class SignalAggregator:
             if len(articles) < settings.min_sources and not has_trusted_solo:
                 continue
 
-            # --- Calculate weighted sentiment ---
             total_weight = 0.0
             weighted_score = 0.0
             headlines = []
@@ -126,8 +115,6 @@ class SignalAggregator:
             avg_sentiment = weighted_score / total_weight
             avg_confidence = sum(sa.confidence for sa in articles) / len(articles)
 
-            # --- FILTER 2: Sentiment agreement ---
-            # Require a supermajority of articles to agree on direction
             total_directional = bullish_count + bearish_count
             if total_directional > 0:
                 if avg_sentiment > 0:
@@ -137,11 +124,9 @@ class SignalAggregator:
             else:
                 agreement = 0.0
 
-            # Skip agreement check for trusted solo signals
             if agreement < settings.min_agreement and not has_trusted_solo:
                 continue
 
-            # --- Determine direction ---
             if avg_sentiment >= settings.buy_signal_threshold and avg_confidence >= settings.min_confidence:
                 direction = SignalDirection.BUY
             elif avg_sentiment <= settings.sell_signal_threshold and avg_confidence >= settings.min_confidence:
@@ -163,13 +148,11 @@ class SignalAggregator:
                 )
                 continue
 
-            # --- FILTER 3: Cooldown ---
             last_time = self._last_signal_time.get(ticker)
             if last_time:
                 elapsed = (now - last_time).total_seconds()
                 last_dir = self._last_direction.get(ticker)
 
-                # If flipping direction (BUY→SELL or SELL→BUY), require longer cooldown
                 if last_dir and last_dir != direction:
                     if elapsed < settings.signal_flip_cooldown_seconds:
                         logger.debug(
@@ -178,11 +161,10 @@ class SignalAggregator:
                         )
                         continue
                 else:
-                    # Same direction repeat — shorter cooldown
                     if elapsed < settings.signal_cooldown_seconds:
                         continue
 
-            signal = TradingSignal(
+            signal_obj = TradingSignal(
                 ticker=ticker,
                 direction=direction,
                 strength=min(abs(avg_sentiment), 1.0),
@@ -194,7 +176,6 @@ class SignalAggregator:
                 expires_at=now + timedelta(seconds=settings.signal_expiry_seconds),
             )
 
-            # Only emit if direction changed or it's a new signal
             existing = self.active_signals.get(ticker)
             if existing is None or existing.direction != direction:
                 logger.info(
@@ -202,10 +183,10 @@ class SignalAggregator:
                     f"sentiment={avg_sentiment:.3f} confidence={avg_confidence:.3f} "
                     f"sources={len(articles)} agreement={agreement:.0%}"
                 )
-                new_signals.append(signal)
+                new_signals.append(signal_obj)
                 self._last_signal_time[ticker] = now
                 self._last_direction[ticker] = direction
 
-            self.active_signals[ticker] = signal
+            self.active_signals[ticker] = signal_obj
 
         return new_signals

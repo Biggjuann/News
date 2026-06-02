@@ -1,12 +1,14 @@
 """
-Trump/White House → SPY Signal Engine
+News Trading Signal Engine
 
-Pipeline: Political news → LLM scoring → Signal → Discord alerts
+Two monitors:
+1. Political/Trump news → SPY signals
+2. Jensen Huang / Nvidia ecosystem → per-ticker signals
 
-Sources (layered for reliability):
-1. Direct: Truth Social API, White House RSS (may be blocked by some hosts)
-2. Filtered: Finnhub + Alpha Vantage general news, filtered for political keywords
-3. Search: Google News RSS with political search queries
+Sources:
+- Finnhub + Alpha Vantage → political keyword filter → SPY
+- Google News political search → SPY
+- Google News Jensen Huang search → NVDA + mentioned tickers
 """
 
 import asyncio
@@ -18,6 +20,7 @@ import uvicorn
 
 from config.settings import settings
 from src.ingestion.google_news_political import create_google_political_sources
+from src.ingestion.jensen_huang_source import create_jensen_sources
 from src.ingestion.finnhub_source import FinnhubSource, FinnhubSentimentSource
 from src.ingestion.alphavantage_source import AlphaVantageSource
 from src.ingestion.political_filter import PoliticalFilter
@@ -50,18 +53,22 @@ class NewsSignalEngine:
 
         self.sources = []
 
-        # --- Finnhub + Alpha Vantage, filtered for political keywords ---
+        # --- Political news → SPY ---
         for source_cls in [FinnhubSource, FinnhubSentimentSource, AlphaVantageSource]:
             source = source_cls()
             if source.is_configured:
                 filtered = PoliticalFilter(source)
                 self.sources.append(filtered)
-                logger.info(f"Enabled: {source.name} → political filter")
+                logger.info(f"Political: {source.name} → keyword filter → SPY")
 
-        # --- Layer 3: Google News political search (always free) ---
-        google_sources = create_google_political_sources()
-        self.sources.extend(google_sources)
-        logger.info(f"Layer 3 (search): {len(google_sources)} Google News political feeds")
+        google_political = create_google_political_sources()
+        self.sources.extend(google_political)
+        logger.info(f"Political: {len(google_political)} Google News search feeds → SPY")
+
+        # --- Jensen Huang / Nvidia ecosystem → per-ticker ---
+        jensen_sources = create_jensen_sources()
+        self.sources.extend(jensen_sources)
+        logger.info(f"Jensen/NVDA: {len(jensen_sources)} Google News search feeds → multi-ticker")
 
         set_aggregator(self.aggregator)
 
@@ -107,10 +114,8 @@ class NewsSignalEngine:
     def get_interval(self, source) -> int:
         """Get the polling interval for a source."""
         name = source.name.lower()
-        if "truth" in name:
-            return settings.truth_social_poll_interval
-        elif "x_" in name or "twitter" in name:
-            return settings.x_poll_interval
+        if "jensen" in name:
+            return 60  # check Jensen news every 60s
         elif "google" in name:
             return 60
         elif "political_finnhub" in name:
@@ -130,7 +135,7 @@ class NewsSignalEngine:
             logger.info(f"  {name}: {status}")
 
         logger.info("=" * 60)
-        logger.info("TRUMP/WHITE HOUSE → SPY SIGNAL ENGINE")
+        logger.info("NEWS TRADING SIGNAL ENGINE (Political + Jensen/NVDA)")
         logger.info(f"Watching: {settings.watch_tickers}")
         logger.info(f"Sources: {len(self.sources)} total")
         logger.info(f"Buy threshold: {settings.buy_signal_threshold}")

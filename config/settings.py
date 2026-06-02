@@ -22,32 +22,26 @@ class Settings(BaseSettings):
 
     # --- Tickers to monitor ---
     watch_tickers: list[str] = Field(
-        default=["SPY"],
-        description="Tickers to monitor (SPY for political signals)"
+        default=["SPY", "NVDA"],
+        description="Primary tickers (Jensen sources add more dynamically)"
     )
 
     # --- Polling intervals (seconds) ---
-    truth_social_poll_interval: int = 30  # check Trump posts every 30s
-    x_poll_interval: int = 30  # check X posts every 30s
-    whitehouse_poll_interval: int = 60  # check White House every 60s
-    finnhub_poll_interval: int = 30  # Finnhub political-filtered news
-    alpha_vantage_poll_interval: int = 300  # Alpha Vantage (25/day free limit)
+    finnhub_poll_interval: int = 30
+    alpha_vantage_poll_interval: int = 300
+    whitehouse_poll_interval: int = 60
 
     # --- Signal thresholds ---
-    # Sentiment score range: -1.0 (extreme bearish) to +1.0 (extreme bullish)
     buy_signal_threshold: float = 0.5
     sell_signal_threshold: float = -0.5
-    min_confidence: float = 0.7  # minimum confidence to act on a signal
-    signal_expiry_seconds: int = 600  # signals expire after 10 minutes
+    min_confidence: float = 0.7
+    signal_expiry_seconds: int = 600
 
     # --- Signal quality filters ---
-    min_sources: int = 2  # minimum articles required to trigger a signal
-    min_agreement: float = 0.65  # 65% of articles must agree on direction
-    signal_cooldown_seconds: int = 300  # 5 min cooldown before repeating same signal
-    signal_flip_cooldown_seconds: int = 900  # 15 min cooldown before flipping BUY↔SELL
-
-    # Trusted sources (Trump posts, WH statements) can trigger signals alone
-    # if they meet this confidence threshold AND have HIGH impact.
+    min_sources: int = 2
+    min_agreement: float = 0.65
+    signal_cooldown_seconds: int = 300
+    signal_flip_cooldown_seconds: int = 900
     trusted_solo_min_confidence: float = 0.7
 
     # --- Server ---

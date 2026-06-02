@@ -1,8 +1,9 @@
 """
-Sentiment scoring engine for political/policy news → SPY impact.
+Sentiment scoring engine for news → stock impact.
 
-Uses Claude Haiku to classify Trump posts, White House statements,
-and policy announcements for their market impact on SPY/S&P 500.
+Handles two types of news:
+1. Political/policy news → SPY impact
+2. Jensen Huang / Nvidia ecosystem news → per-ticker impact
 """
 
 import json
@@ -16,13 +17,14 @@ from src.models import NewsArticle, ScoredArticle, Sentiment, Impact
 
 logger = logging.getLogger(__name__)
 
-LLM_PROMPT = """You are an expert at analyzing political statements and policy announcements for their impact on the S&P 500 (SPY).
+POLITICAL_PROMPT = """You are an expert at analyzing political statements and policy announcements for their impact on the S&P 500 (SPY).
 
 Source: {source}
-Post/Statement: {headline}
-Additional context: {summary}
+Headline: {headline}
+Context: {summary}
+Tickers: {tickers}
 
-Analyze this for its likely IMMEDIATE impact on SPY. Respond with ONLY a JSON object:
+Analyze this for its likely IMMEDIATE impact on the tickers listed. Respond with ONLY a JSON object:
 {{
   "sentiment": "bullish" | "bearish" | "neutral",
   "score": <float from -1.0 to 1.0>,
@@ -32,29 +34,50 @@ Analyze this for its likely IMMEDIATE impact on SPY. Respond with ONLY a JSON ob
 }}
 
 Scoring guide for political/policy news → SPY:
+BULLISH: Tariff reductions, trade deals, deregulation, tax cuts, peace deals, rate cuts
+BEARISH: New tariffs, trade war escalation, sanctions, shutdowns, military action, antitrust
+NEUTRAL: Personal attacks, routine ceremonies, vague promises, cultural commentary
+
+Set confidence LOW (0.2-0.4) if vague. HIGH (0.7-0.9) if specific policy actions.
+Set impact "high" ONLY for concrete actions (tariffs, executive orders, deals)."""
+
+JENSEN_PROMPT = """You are an expert at analyzing how Jensen Huang (Nvidia CEO) comments, partnerships, and announcements affect specific stocks.
+
+Source: {source}
+Headline: {headline}
+Context: {summary}
+Tickers mentioned: {tickers}
+
+Analyze this for its likely impact on the mentioned tickers. Respond with ONLY a JSON object:
+{{
+  "sentiment": "bullish" | "bearish" | "neutral",
+  "score": <float from -1.0 to 1.0>,
+  "confidence": <float from 0.0 to 1.0>,
+  "impact": "high" | "medium" | "low",
+  "reasoning": "<one sentence why>"
+}}
+
+Scoring guide for Jensen/Nvidia news:
 BULLISH (+0.3 to +1.0):
-- Tariff reductions, trade deals, deregulation
-- Tax cuts, pro-business executive orders
-- Peace deals, ceasefire agreements
-- Positive economic commentary ("economy is great", "markets will boom")
-- Fed pressure for rate cuts
+- Jensen praises a company, announces partnership/deal/collaboration
+- Nvidia selects a company as key supplier/customer/platform partner
+- Positive comments about a sector Nvidia is investing in
+- New product launches that benefit ecosystem partners
+- Jensen says demand is strong, supply can't keep up
 
 BEARISH (-0.3 to -1.0):
-- New tariffs, trade war escalation, sanctions
-- Government shutdown threats, debt ceiling issues
-- Military action, geopolitical escalation
-- Attacks on companies, sectors, or the Fed
-- Regulatory crackdowns, antitrust threats
+- Jensen criticizes a competitor or shifts away from a partner
+- Nvidia drops a supplier or moves to in-house solution
+- Jensen warns about demand slowdown or oversupply
+- Negative comments about a specific company's technology
 
 NEUTRAL (-0.2 to +0.2):
-- Personal attacks on political opponents (no market impact)
-- Routine ceremonial posts, holidays, rallies
-- Restatements of known policy positions
-- Social/cultural commentary with no economic angle
+- Generic keynote content without specific company mentions
+- Routine product updates with no partner implications
+- Vague AI hype without concrete business impact
 
-Set confidence LOW (0.2-0.4) if the post is vague or could be interpreted multiple ways.
-Set confidence HIGH (0.7-0.9) if the post contains specific policy actions or clear economic implications.
-Set impact to "high" ONLY for concrete policy actions (tariffs, executive orders, deals). Vague promises are "medium" at best."""
+Set confidence HIGH when Jensen specifically names a company with a concrete action (deal, partnership, order).
+Set confidence LOW for generic commentary or when the connection to a ticker is indirect."""
 
 
 class SentimentScorer:
@@ -105,18 +128,25 @@ class SentimentScorer:
             article=article,
             sentiment=sentiment,
             sentiment_score=score,
-            confidence=min(abs_score + 0.3, 1.0),  # pre-scored sources get a confidence boost
+            confidence=min(abs_score + 0.3, 1.0),
             impact=impact,
             scoring_method="source_prescored",
         )
 
-    async def _score_with_llm(self, article: NewsArticle) -> ScoredArticle:
-        """Use Claude Haiku to classify sentiment."""
-        prompt = LLM_PROMPT.format(
+    def _pick_prompt(self, article: NewsArticle) -> str:
+        """Select the right prompt template based on article source."""
+        is_jensen = "jensen" in article.source.lower() or "jensen" in article.headline.lower()
+        template = JENSEN_PROMPT if is_jensen else POLITICAL_PROMPT
+        return template.format(
             source=article.source,
             headline=article.headline,
             summary=article.summary[:300] if article.summary else "No additional context",
+            tickers=", ".join(article.tickers) if article.tickers else "unknown",
         )
+
+    async def _score_with_llm(self, article: NewsArticle) -> ScoredArticle:
+        """Use Claude Haiku to classify sentiment."""
+        prompt = self._pick_prompt(article)
 
         try:
             response = await self._client.messages.create(
@@ -126,7 +156,6 @@ class SentimentScorer:
             )
 
             text = response.content[0].text.strip()
-            # Strip markdown code fences if present
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             data = json.loads(text)
