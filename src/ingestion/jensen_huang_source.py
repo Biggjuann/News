@@ -73,7 +73,8 @@ def _extract_tickers(text: str) -> list[str]:
     for company, ticker in NVIDIA_ECOSYSTEM_TICKERS.items():
         if company in text_lower:
             found.add(ticker)
-    found.add("NVDA")
+    if not found:
+        found.add("NVDA")
     return sorted(found)
 
 
@@ -114,6 +115,7 @@ class JensenHuangSource(NewsSource):
     def __init__(self, query_name: str, query: str):
         super().__init__(f"jensen_{query_name}")
         self.feed_url = GOOGLE_NEWS_RSS.format(query=query)
+        self._shared_seen: set[str] | None = None
 
     async def fetch(self, tickers: list[str]) -> list[NewsArticle]:
         articles = []
@@ -137,6 +139,13 @@ class JensenHuangSource(NewsSource):
                 if not headline:
                     continue
 
+                # Cross-feed dedup: skip if another Jensen feed already saw this headline
+                headline_key = headline.lower().strip()
+                if self._shared_seen is not None:
+                    if headline_key in self._shared_seen:
+                        continue
+                    self._shared_seen.add(headline_key)
+
                 full_text = f"{headline} {summary}"
                 mentioned_tickers = _extract_tickers(full_text)
 
@@ -159,8 +168,16 @@ class JensenHuangSource(NewsSource):
         return self._deduplicate(articles)
 
 
+# Shared headline dedup across all Jensen feeds so the same article
+# from multiple search queries doesn't count as multiple sources.
+_shared_seen_headlines: set[str] = set()
+
+
 def create_jensen_sources() -> list[JensenHuangSource]:
-    return [
-        JensenHuangSource(name, query)
-        for name, query in JENSEN_QUERIES.items()
-    ]
+    _shared_seen_headlines.clear()
+    sources = []
+    for name, query in JENSEN_QUERIES.items():
+        s = JensenHuangSource(name, query)
+        s._shared_seen = _shared_seen_headlines
+        sources.append(s)
+    return sources

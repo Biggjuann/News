@@ -147,6 +147,7 @@ class TrumpCompanySource(NewsSource):
     def __init__(self, query_name: str, query: str):
         super().__init__(f"trump_co_{query_name}")
         self.feed_url = GOOGLE_NEWS_RSS.format(query=query)
+        self._shared_seen: set[str] | None = None
 
     async def fetch(self, tickers: list[str]) -> list[NewsArticle]:
         articles = []
@@ -170,6 +171,12 @@ class TrumpCompanySource(NewsSource):
                 if not headline:
                     continue
 
+                headline_key = headline.lower().strip()
+                if self._shared_seen is not None:
+                    if headline_key in self._shared_seen:
+                        continue
+                    self._shared_seen.add(headline_key)
+
                 full_text = f"{headline} {summary}"
                 mentioned_tickers = _extract_tickers(full_text)
 
@@ -192,8 +199,14 @@ class TrumpCompanySource(NewsSource):
         return self._deduplicate(articles)
 
 
+_shared_seen_headlines: set[str] = set()
+
+
 def create_trump_company_sources() -> list[TrumpCompanySource]:
-    return [
-        TrumpCompanySource(name, query)
-        for name, query in TRUMP_COMPANY_QUERIES.items()
-    ]
+    _shared_seen_headlines.clear()
+    sources = []
+    for name, query in TRUMP_COMPANY_QUERIES.items():
+        s = TrumpCompanySource(name, query)
+        s._shared_seen = _shared_seen_headlines
+        sources.append(s)
+    return sources
