@@ -146,14 +146,18 @@ class JensenHuangSource(NewsSource):
                         continue
                     self._shared_seen.add(headline_key)
 
-                full_text = f"{headline} {summary}"
+                clean_headline = headline
+                if news_source and headline.endswith(f" - {news_source}"):
+                    clean_headline = headline[:-(len(news_source) + 3)]
+
+                full_text = f"{clean_headline} {summary}"
                 mentioned_tickers = _extract_tickers(full_text)
 
                 source_tag = f"[{news_source}] " if news_source else ""
 
                 articles.append(NewsArticle(
                     source=self.name,
-                    headline=f"[Jensen/NVDA] {source_tag}{headline}",
+                    headline=f"[Jensen/NVDA] {source_tag}{clean_headline}",
                     summary=summary[:500],
                     url=entry["link"],
                     tickers=mentioned_tickers,

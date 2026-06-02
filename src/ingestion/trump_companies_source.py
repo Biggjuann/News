@@ -44,9 +44,9 @@ TRUMP_TARGET_TICKERS = {
     "truth social": "DJT", "tmtg": "DJT",
     "disney": "DIS",
     "netflix": "NFLX",
-    "comcast": "CMCSA", "nbc": "CMCSA", "msnbc": "CMCSA",
-    "fox": "FOX", "fox news": "FOXA",
-    "cnn": "WBD", "warner": "WBD",
+    "comcast": "CMCSA", "nbc news": "CMCSA", "msnbc": "CMCSA",
+    "fox corp": "FOX", "fox news channel": "FOXA",
+    "cnn": "WBD", "warner bros": "WBD",
     "lockheed": "LMT", "lockheed martin": "LMT",
     "boeing": "BA",
     "raytheon": "RTX",
@@ -177,14 +177,20 @@ class TrumpCompanySource(NewsSource):
                         continue
                     self._shared_seen.add(headline_key)
 
-                full_text = f"{headline} {summary}"
+                # Strip news source suffix from headline before ticker extraction
+                # Google News RSS titles often end with " - Fox Business", " - Reuters", etc.
+                clean_headline = headline
+                if news_source and headline.endswith(f" - {news_source}"):
+                    clean_headline = headline[:-(len(news_source) + 3)]
+
+                full_text = f"{clean_headline} {summary}"
                 mentioned_tickers = _extract_tickers(full_text)
 
                 source_tag = f"[{news_source}] " if news_source else ""
 
                 articles.append(NewsArticle(
                     source=self.name,
-                    headline=f"[Trump/Co] {source_tag}{headline}",
+                    headline=f"[Trump/Co] {source_tag}{clean_headline}",
                     summary=summary[:500],
                     url=entry["link"],
                     tickers=mentioned_tickers,
