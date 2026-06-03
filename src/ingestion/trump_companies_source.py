@@ -37,11 +37,8 @@ TRUMP_TARGET_TICKERS = {
     "meta": "META", "facebook": "META", "zuckerberg": "META",
     "microsoft": "MSFT",
     "nvidia": "NVDA", "jensen": "NVDA",
-    "tesla": "TSLA", "elon": "TSLA", "musk": "TSLA",
-    "twitter": "TSLA",
-    "tiktok": "SNAP",
-    "bytedance": "META",
-    "truth social": "DJT", "tmtg": "DJT",
+    "tesla": "TSLA", "elon musk": "TSLA",
+    "truth social stock": "DJT", "tmtg stock": "DJT", "djt stock": "DJT",
     "disney": "DIS",
     "netflix": "NFLX",
     "comcast": "CMCSA", "nbc news": "CMCSA", "msnbc": "CMCSA",
@@ -93,9 +90,9 @@ TRUMP_TARGET_TICKERS = {
     "tractor supply": "TSCO",
     "blackstone": "BX",
     "softbank": "SFTBY",
-    "stock market": "SPY", "s&p": "SPY", "market": "SPY",
-    "dow": "DIA",
-    "nasdaq": "QQQ",
+    "stock market": "SPY", "s&p 500": "SPY",
+    "dow jones": "DIA",
+    "nasdaq 100": "QQQ",
 }
 
 
