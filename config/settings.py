@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     # --- Signal quality filters ---
     min_sources: int = 2
     min_agreement: float = 0.65
-    signal_cooldown_seconds: int = 300
-    signal_flip_cooldown_seconds: int = 900
+    signal_cooldown_seconds: int = 3600  # 1 hour before repeating same-direction signal for a ticker
+    signal_flip_cooldown_seconds: int = 1800  # 30 min before flipping BUY↔SELL on same ticker
     trusted_solo_min_confidence: float = 0.7
 
     # --- Server ---

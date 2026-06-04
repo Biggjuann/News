@@ -48,6 +48,29 @@ class SignalAggregator:
         self.active_signals: dict[str, TradingSignal] = {}
         self._last_signal_time: dict[str, datetime] = {}
         self._last_direction: dict[str, SignalDirection] = {}
+        # Track headlines that already triggered alerts to prevent same-story repeats
+        self._alerted_headlines: dict[str, datetime] = {}
+
+    def _headline_already_alerted(self, headlines: list[str], ticker: str) -> bool:
+        """Check if we already sent an alert driven by the same headlines."""
+        now = datetime.now(timezone.utc)
+        # Clean up old entries (older than 24h)
+        cutoff = now - timedelta(hours=24)
+        self._alerted_headlines = {
+            k: v for k, v in self._alerted_headlines.items() if v > cutoff
+        }
+        for h in headlines:
+            key = f"{ticker}:{h.lower().strip()[:80]}"
+            if key in self._alerted_headlines:
+                return True
+        return False
+
+    def _mark_headlines_alerted(self, headlines: list[str], ticker: str):
+        """Record that these headlines triggered an alert."""
+        now = datetime.now(timezone.utc)
+        for h in headlines:
+            key = f"{ticker}:{h.lower().strip()[:80]}"
+            self._alerted_headlines[key] = now
 
     def ingest(self, scored_articles: list[ScoredArticle]):
         """Add scored articles to the rolling buffer."""
@@ -177,6 +200,10 @@ class SignalAggregator:
                 expires_at=now + timedelta(seconds=settings.signal_expiry_seconds),
             )
 
+            # --- FILTER 4: Headline dedup (same story shouldn't alert twice in 24h) ---
+            if self._headline_already_alerted(headlines, ticker):
+                continue
+
             existing = self.active_signals.get(ticker)
             if existing is None or existing.direction != direction:
                 logger.info(
@@ -187,6 +214,7 @@ class SignalAggregator:
                 new_signals.append(signal_obj)
                 self._last_signal_time[ticker] = now
                 self._last_direction[ticker] = direction
+                self._mark_headlines_alerted(headlines, ticker)
 
             self.active_signals[ticker] = signal_obj
 
